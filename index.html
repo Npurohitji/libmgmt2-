@@ -12,7 +12,7 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
 
-        // --- YOUR FIREBASE CONFIGURATION (UPDATED) ---
+        // --- YOUR FIREBASE CONFIGURATION (INTEGRATED FOR GITHUB) ---
         const manualConfig = {
             apiKey: "AIzaSyDDco9kK4uyTKnu0WCfviiJwy87gyUdRr0",
             authDomain: "libmgmt-eccd3.firebaseapp.com",
@@ -59,8 +59,8 @@
 
         window.cloudSave = async (coll, data, id = null) => {
             if (!db || !auth.currentUser) {
-                window.showToast("Local Mode: Not Synced");
-                return true; 
+                window.showToast("Error: Cloud Not Connected");
+                return false; 
             }
             try {
                 if (id) await setDoc(doc(db, publicPath, coll, id), data, { merge: true });
@@ -68,6 +68,7 @@
                 return true;
             } catch (e) { 
                 console.error("Cloud Error:", e);
+                window.showToast("Permission Denied or Sync Error");
                 return false; 
             }
         };
@@ -286,7 +287,8 @@
                     const appInstance = initializeApp(currentConfig);
                     db = getFirestore(appInstance);
                     auth = getAuth(appInstance);
-                    const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'lib-mgmt-eccd3';
+                    // Use YOUR specific appId
+                    const currentAppId = 'libmgmt-eccd3';
                     publicPath = `artifacts/${currentAppId}/public/data`;
 
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
