@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LibCommand Cloud v12.1 | Direct Access Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
+
+        // --- FIREBASE CONFIGURATION ---
+        // If you are deploying to GitHub, paste your Firebase config object below:
+        const manualConfig = {
+            apiKey: "",
+            authDomain: "",
+            projectId: "",
+            storageBucket: "",
+            messagingSenderId: "",
+            appId: ""
+        };
+
+        let config;
+        try {
+            // Priority 1: Environment variable (if in the editor)
+            config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
+        } catch (e) {
+            config = manualConfig;
+        }
+
+        const app = initializeApp(config);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'lib-command-v121';
+        const publicPath = `artifacts/${appId}/public/data`;
+
+        // --- GLOBAL STATE ---
+        window.TOTAL_CAPACITY = 110;
+        window.students = [];
+        window.logs = [];
+        window.currentRegistryFilter = 'all';
+
+        // --- CORE UI HELPERS ---
+        window.setUI = (id, val, attr = 'innerText') => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (attr === 'styleWidth') el.style.width = val;
+            else if (attr === 'innerHTML') el.innerHTML = val;
+            else el[attr] = val;
+        };
+
+        window.showToast = (m) => {
+            const t = document.getElementById('toast');
+            if(t) {
+                t.innerText = m;
+                t.classList.remove('opacity-0', 'translate-y-10');
+                setTimeout(() => t.classList.add('opacity-0', 'translate-y-10'), 3000);
+            }
+        };
+
+        window.calculateNext = (d) => {
+            if(!d) return "";
+            const date = new Date(d);
+            date.setMonth(date.getMonth() + 1);
+            return date.toISOString().split('T')[0];
+        };
+
+        // --- CLOUD OPS ---
+        window.cloudSave = async (coll, data, id = null) => {
+            if (!auth.currentUser) return false;
+            try {
+                if (id) await setDoc(doc(db, publicPath, coll, id), data, { merge: true });
+                else await addDoc(collection(db, publicPath, coll), data);
+                return true;
+            } catch (e) { 
+                console.error("Cloud Error:", e);
+                return false; 
+            }
+        };
+
+        window.cloudDelete = async (coll, id) => {
+            if (auth.currentUser) await deleteDoc(doc(db, publicPath, coll, id));
+        };
+
+        // --- DASHBOARD UI UPDATER ---
+        window.refreshDashboard = () => {
+            const today = new Date(); today.setHours(0,0,0,0);
+            const activeOnes = window.students.filter(s => s.active);
+            
+            window.setUI('stat-seats-left', Math.max(0, window.TOTAL_CAPACITY - activeOnes.length));
+            window.setUI('stat-active-count', activeOnes.length);
+            window.setUI('stat-capacity-progress', Math.min(100, (activeOnes.length/window.TOTAL_CAPACITY)*100) + '%', 'styleWidth');
+            window.setUI('stat-total', window.students.length);
+            window.setUI('stat-active', activeOnes.length);
+            window.setUI('stat-pending', activeOnes.filter(s => new Date(s.nextDue) <= today).length);
+
+            const shifts = ["7am-7pm", "7am-10pm", "4pm-10pm"];
+            const shiftCont = document.getElementById('shift-load-container');
+            if(shiftCont) {
+                shiftCont.innerHTML = shifts.map(key => {
+                    const count = window.students.filter(s => s.active && s.shift === key).length;
+                    return `<div class="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100"><span class="text-xs font-black text-slate-400 uppercase tracking-widest">${key}</span><span class="text-sm font-black text-indigo-600">${count} Members</span></div>`;
+                }).join('');
+            }
+
+            const totalRev = window.logs.reduce((a,l)=>a+(Number(l.amount)||0),0);
+            window.setUI('stat-revenue', `?${totalRev.toLocaleString()}`);
+            window.setUI('rev-upi', `?${window.logs.filter(l=>l.mode==='UPI').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
+            window.setUI('rev-cash', `?${window.logs.filter(l=>l.mode==='Cash').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
+
+            const logCont = document.getElementById('activity-log');
+            if(logCont) {
+                logCont.innerHTML = window.logs.slice(0, 10).map(l => `
+                    <div class="flex justify-between items-center p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
+                        <div><div class="text-sm font-black text-slate-900 uppercase tracking-tighter">${l.name}</div><div class="text-[9px] font-bold text-slate-400 uppercase">Settled • ${l.date}</div></div>
+                        <div class="text-sm font-black text-indigo-600">?${l.amount}</div>
+                    </div>
+                `).join('') || `<p class="py-10 text-center text-xs text-slate-300 font-bold uppercase">Cloud Journal Empty</p>`;
+            }
+            lucide.createIcons();
+        };
+
+        // --- STUDENT MODAL & IMAGE HANDLING ---
+        window.openModal = (id = null) => {
+            const form = document.getElementById('student-form');
+            if(form) form.reset();
+            const editIdEl = document.getElementById('edit-id');
+            if(editIdEl) editIdEl.value = id || '';
+            
+            ['photo-preview', 'aadhar-front-preview', 'aadhar-back-preview'].forEach(k => { 
+                const el = document.getElementById(k); if(el){ el.src=''; el.classList.add('hidden'); }
+                const ph = document.getElementById(k.replace('preview','placeholder')); if(ph) ph.classList.remove('hidden');
+            });
+
+            if(id) {
+                const s = window.students.find(x=>x.id===id);
+                if(s) {
+                    document.getElementById('name').value = s.name; 
+                    document.getElementById('amount').value = s.amount;
+                    document.getElementById('dob').value = s.dob || ''; 
+                    document.getElementById('register-pg').value = s.registerPg || '';
+                    document.getElementById('mobile').value = s.mobile || '';
+                    document.getElementById('whatsapp').value = s.whatsapp || '';
+                    document.getElementById('emergency').value = s.emergency || '';
+                    document.getElementById('relation').value = s.relation || '';
+                    document.getElementById('addr-c').value = s.addrC || '';
+                    document.getElementById('addr-p').value = s.addrP || '';
+                    document.getElementById('pay-mode').value = s.payMode || 'UPI';
+                    document.getElementById('shift').value = s.shift || '7am-7pm';
+                    document.getElementById('joining-date').value = s.joiningDate;
+                    if(s.photo) {
+                        const pp = document.getElementById('photo-preview');
+                        if(pp) { pp.src = s.photo; pp.classList.remove('hidden'); document.getElementById('photo-placeholder')?.classList.add('hidden'); }
+                    }
+                }
+            } else {
+                const dateInp = document.getElementById('joining-date');
+                if(dateInp) dateInp.value = new Date().toISOString().split('T')[0];
+            }
+            document.getElementById('modal')?.classList.remove('hidden');
+        };
+
+        window.closeModal = () => { document.getElementById('modal')?.classList.add('hidden'); };
+
+        window.handleFormSubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-id').value;
+            window.showToast("Saving Digital Record...");
+            
+            const data = {
+                name: document.getElementById('name').value, dob: document.getElementById('dob').value,
+                shift: document.getElementById('shift').value, amount: parseFloat(document.getElementById('amount').value),
+                registerPg: document.getElementById('register-pg').value, joiningDate: document.getElementById('joining-date').value,
+                mobile: document.getElementById('mobile').value, whatsapp: document.getElementById('whatsapp').value,
+                emergency: document.getElementById('emergency').value, relation: document.getElementById('relation').value,
+                addrC: document.getElementById('addr-c').value, addrP: document.getElementById('addr-p').value,
+                payMode: document.getElementById('pay-mode').value, active: true,
+                nextDue: window.calculateNext(document.getElementById('joining-date').value)
+            };
+
+            const getProcessedImg = async (fid) => {
+                const f = document.getElementById(fid).files[0];
+                if(!f) return null;
+                const b64 = await window.convertToBase64(f);
+                return await window.compressImage(b64);
+            };
+
+            const p = await getProcessedImg('photo-upload'); if(p) data.photo = p;
+            const af = await getProcessedImg('aadhar-front-upload'); if(af) data.aadharFront = af;
+            const ab = await getProcessedImg('aadhar-back-upload'); if(ab) data.aadharBack = ab;
+
+            if (await window.cloudSave('students', data, id || null)) {
+                if(!id) await window.cloudSave('logs', { name: data.name, amount: data.amount, mode: data.payMode, date: data.joiningDate, staff: "System" });
+                window.closeModal();
+                window.showToast("Cloud Record Secured");
+            }
+        };
+
+        window.openRegistry = (f) => { window.currentRegistryFilter = f; document.getElementById('registry-overlay')?.classList.add('active-overlay'); window.renderRegistry(); };
+        window.closeRegistry = () => { document.getElementById('registry-overlay')?.classList.remove('active-overlay'); };
+        window.renderRegistry = () => {
+            const qEl = document.getElementById('registry-search');
+            if(!qEl) return;
+            const q = qEl.value.toLowerCase();
+            const today = new Date(); today.setHours(0,0,0,0);
+            let filtered = window.students.filter(s => {
+                const m = s.name.toLowerCase().includes(q) || (s.registerPg && s.registerPg.includes(q));
+                if (window.currentRegistryFilter === 'active') return s.active && m;
+                if (window.currentRegistryFilter === 'pending') return s.active && (new Date(s.nextDue) <= today) && m;
+                return m;
+            });
+            const body = document.getElementById('registry-body');
+            if(body) {
+                body.innerHTML = filtered.map(s => `
+                    <tr class="hover:bg-slate-50 transition-colors border-b">
+                        <td class="px-10 py-6"><div onclick="window.openProfile('${s.id}')" class="font-black text-slate-900 cursor-pointer hover:text-indigo-600 uppercase tracking-tighter">${s.name}</div><div class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">PG ${s.registerPg || '--'} • ${s.shift}</div></td>
+                        <td class="px-8 py-6 text-center font-bold text-xs text-slate-500">${new Date(s.nextDue).toLocaleDateString()}</td>
+                        <td class="px-10 py-6 text-right"><div class="flex justify-end gap-2"><button onclick="window.openModal('${s.id}')" class="p-2 border rounded-xl hover:bg-slate-50 transition-all"><i data-lucide="edit-3" class="w-4 h-4 text-slate-400"></i></button><button onclick="window.deleteStudent('${s.id}')" class="p-2 border rounded-xl hover:bg-rose-50 transition-all text-rose-300 hover:text-rose-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></td>
+                    </tr>
+                `).join('');
+            }
+            lucide.createIcons();
+        };
+
+        window.openProfile = (sid) => {
+            const s = window.students.find(x => x.id === sid);
+            if(!s) return;
+            window.setUI('profile-view-name', s.name);
+            window.setUI('profile-view-register', `#${s.registerPg || '--'}`);
+            window.setUI('profile-view-shift', s.shift);
+            window.setUI('profile-view-dob', s.dob || 'N/A');
+            window.setUI('profile-view-aadhar', s.aadharNum || 'N/A');
+            window.setUI('profile-view-mobile', s.mobile || 'N/A');
+            window.setUI('profile-view-whatsapp', s.whatsapp || 'N/A');
+            window.setUI('profile-view-emergency-num', s.emergency || 'N/A');
+            window.setUI('profile-view-emergency-rel', s.relation || 'N/A');
+            window.setUI('profile-view-addr-c', s.addrC || 'N/A');
+            window.setUI('profile-view-addr-p', s.addrP || 'N/A');
+            
+            const setImg = (id, src) => {
+                const img = document.getElementById(id);
+                if(img) { if(src){ img.src = src; img.classList.remove('hidden'); } else { img.classList.add('hidden'); } }
+            };
+            setImg('profile-view-photo', s.photo);
+            setImg('profile-view-aadhar-f', s.aadharFront);
+            setImg('profile-view-aadhar-b', s.aadharBack);
+
+            const hist = window.logs.filter(l => l.name === s.name);
+            const histBody = document.getElementById('profile-history-body');
+            if(histBody) {
+                histBody.innerHTML = hist.map(l => `<tr><td class="px-10 py-5 text-sm font-bold text-slate-700">${l.date}</td><td class="px-10 py-5 text-sm font-black text-slate-900">?${l.amount}</td><td class="px-10 py-5 text-center"><span class="px-3 py-1 rounded-lg border text-[9px] font-black uppercase ${l.mode==='UPI'?'text-blue-500 bg-blue-50':'text-emerald-500 bg-emerald-50'}">${l.mode}</span></td><td class="px-10 py-5 text-right text-xs font-bold text-slate-400">Verified</td></tr>`).join('');
+            }
+            
+            const today = new Date(); today.setHours(0,0,0,0);
+            const isDue = s.active && new Date(s.nextDue) <= today;
+            window.setUI('profile-status-badge', `<div class="px-6 py-2 rounded-2xl font-black text-xs text-white uppercase tracking-widest ${s.active ? (isDue ? 'bg-rose-500 shadow-xl' : 'bg-emerald-500') : 'bg-slate-300'}">${s.active ? (isDue ? 'PAYMENT DUE' : 'ACTIVE') : 'ARCHIVED'}</div>`, 'innerHTML');
+            
+            document.getElementById('profile-overlay')?.classList.add('active-overlay');
+            lucide.createIcons();
+        };
+
+        // --- HELPERS ---
+        window.deleteStudent = async (id) => { if (confirm("Erase dossier from Cloud?")) await window.cloudDelete('students', id); };
+        window.closeProfile = () => { document.getElementById('profile-overlay')?.classList.remove('active-overlay'); };
+        window.inspectImage = (id) => { const src = document.getElementById(id)?.src; if(!src) return; const win = window.open(); win.document.write(`<style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:90%;max-height:90%; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,0.5);}</style><img src="${src}">`); };
+        window.convertToBase64 = (f) => { return new Promise(r => { const rd = new FileReader(); rd.onload = e => r(rd.result); rd.readAsDataURL(f); }); };
+        window.compressImage = async (b64) => { return new Promise(r => { const img = new Image(); img.src = b64; img.onload = () => { const cv = document.createElement('canvas'); let w = img.width, h = img.height; if (w > 400) { h *= 400 / w; w = 400; } cv.width = w; cv.height = h; cv.getContext('2d').drawImage(img, 0,0,w,h); r(cv.toDataURL('image/jpeg', 0.6)); }; }); };
+        window.handleMobileInput = (el) => { if (document.getElementById('sync-whatsapp')?.checked) document.getElementById('whatsapp').value = el.value; };
+        window.toggleWhatsappSync = (checkbox) => { if (checkbox.checked) document.getElementById('whatsapp').value = document.getElementById('mobile').value; };
+        window.handleAddressSync = () => { if (document.getElementById('sync-address')?.checked) document.getElementById('addr-p').value = document.getElementById('addr-c').value; };
+        window.handleRevenueFilterChange = () => { window.refreshDashboard(); };
+
+        // --- STARTUP ---
+        function setupListeners() {
+            onSnapshot(collection(db, publicPath, 'students'), (snap) => {
+                window.students = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                window.refreshDashboard();
+                window.renderRegistry();
+            });
+            onSnapshot(collection(db, publicPath, 'logs'), (snap) => {
+                window.logs = snap.docs.map(doc => doc.data()).sort((a,b) => new Date(b.date) - new Date(a.date));
+                window.refreshDashboard();
+            });
+        }
+        
+        async function runAutoAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                else await signInAnonymously(auth);
+                
+                const dash = document.getElementById('dashboard-view');
+                dash.classList.remove('hidden');
+                setTimeout(() => dash.classList.add('opacity-100'), 100);
+                document.body.classList.remove('overflow-hidden');
+                
+                setupListeners();
+                window.showToast("Cloud Terminal Connected");
+            } catch (error) { 
+                console.error("Auth Fail:", error); 
+                window.showToast("Check Firebase Config");
+            }
+        }
+        runAutoAuth();
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; letter-spacing: -0.02em; }
+        .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid #e2e8f0; }
+        .stat-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); background: white; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .active-overlay { transform: translateX(0) !important; }
+        .capacity-bar { height: 10px; border-radius: 5px; background: #f1f5f9; overflow: hidden; }
+        .capacity-fill { height: 100%; transition: width 0.6s ease; }
+        .registry-tab { padding: 0.5rem 1rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; transition: all 0.2s; cursor: pointer; }
+        .registry-tab.active { background-color: #4f46e5; color: white; }
+        .image-preview-box { width: 100%; height: 100px; border: 2px dashed #e2e8f0; border-radius: 1rem; display: flex; align-items: center; justify-content: center; overflow: hidden; background-color: #f8fafc; cursor: pointer; }
+        .image-preview-box img { width: 100%; height: 100%; object-fit: cover; }
+    </style>
+</head>
+<body class="text-slate-900 min-h-screen overflow-hidden"> 
+
+    <div id="dashboard-view" class="hidden opacity-0 transition-all duration-700 min-h-screen">
+        <nav class="glass-header sticky top-0 z-40 px-6 py-4">
+            <div class="max-w-7xl mx-auto flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600 p-2.5 rounded-2xl shadow-lg"><i data-lucide="layout" class="w-5 h-5 text-white"></i></div>
+                    <div class="text-left leading-none"><h1 class="text-sm font-extrabold tracking-tight text-slate-900 uppercase">LibCommand <span class="text-indigo-600">Cloud</span></h1><p class="text-[9px] font-black text-slate-400 uppercase mt-1">Live Terminal</p></div>
+                </div>
+                <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-[1.5rem] font-black text-xs flex items-center gap-3 shadow-xl transition-all hover:scale-105 active:scale-95 group"><i data-lucide="user-plus" class="w-5 h-4"></i> ENROLL STUDENT</button>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto px-6 py-8">
+            <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm mb-8 flex flex-col md:flex-row items-center gap-8">
+                <div class="flex-1 text-left"><h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 leading-none">Seat Occupancy Monitor</h3><div class="flex items-baseline gap-3 mb-5 text-left"><span id="stat-seats-left" class="text-5xl font-black text-indigo-600 leading-none">0</span><span class="text-lg font-bold text-slate-400 text-left">Open Slots</span></div><div class="capacity-bar w-full"><div id="stat-capacity-progress" class="capacity-fill bg-indigo-600 w-0"></div></div></div>
+                <div class="bg-slate-50 px-8 py-6 rounded-3xl border border-slate-100 text-center min-w-[150px]"><div class="text-[10px] font-black text-slate-400 uppercase mb-1 leading-none text-center">Active Students</div><div class="text-2xl font-black text-slate-800 text-center"><span id="stat-active-count">0</span> / 110</div></div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-blue-50 text-blue-600 rounded-xl w-fit mb-4"><i data-lucide="users" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Total Enrolled</h3><div id="stat-total" class="text-3xl font-black text-slate-800">0</div></div>
+                <div onclick="openRegistry('active')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl w-fit mb-4"><i data-lucide="user-check" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Currently Active</h3><div id="stat-active" class="text-3xl font-black text-emerald-600">0</div></div>
+                <div onclick="openRegistry('pending')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-rose-50 text-rose-600 rounded-xl w-fit mb-4"><i data-lucide="alert-triangle" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Fees Due</h3><div id="stat-pending" class="text-3xl font-black text-rose-600">0</div></div>
+                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-slate-100 text-slate-400 rounded-xl w-fit mb-4"><i data-lucide="archive" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Database Access</h3><div class="text-3xl font-black text-slate-400 uppercase">View</div></div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <div class="lg:col-span-1 space-y-6">
+                    <div class="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white text-left">
+                        <h3 class="text-xs font-black uppercase mb-4 opacity-60 tracking-widest">Revenue Tracker</h3>
+                        <select id="rev-date-filter" onchange="handleRevenueFilterChange()" class="w-full bg-slate-800 border-none rounded-xl px-4 py-2.5 text-[10px] font-black text-slate-300 outline-none mb-4"><option value="all">Lifetime Total</option><option value="today">Today Only</option><option value="month">Current Month</option></select>
+                        <div id="stat-revenue" class="text-3xl font-black mb-6 tracking-tight">?0</div>
+                        <div class="space-y-3 pt-6 border-t border-slate-800">
+                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">UPI Digital</span><span id="rev-upi" class="text-blue-400">?0</span></div>
+                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">Cash Reserve</span><span id="rev-cash" class="text-emerald-400">?0</span></div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm text-left"><h3 class="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> Active Shifts</h3><div id="shift-load-container" class="space-y-3"></div></div>
+                </div>
+                <div class="lg:col-span-3">
+                    <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm h-full flex flex-col min-h-[500px]">
+                        <h3 class="text-xs font-black text-slate-500 uppercase tracking-widest mb-8 flex items-center gap-2 text-left"><i data-lucide="clock" class="w-4 h-4 text-indigo-600"></i> Global Activity Log</h3>
+                        <div id="activity-log" class="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-4 text-left"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- MODAL -->
+    <div id="modal" class="hidden fixed inset-0 z-[3000] flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-slate-900/80 backdrop-blur-md" onclick="closeModal()"></div>
+        <div class="modal-enter bg-white rounded-[3.5rem] shadow-2xl z-[3100] w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh]">
+            <div class="px-10 py-7 bg-slate-50 flex justify-between items-center border-b">
+                <h3 id="modal-title" class="text-2xl font-black text-slate-900 uppercase">Registration Dossier</h3>
+                <button onclick="closeModal()" class="p-2.5 bg-white rounded-xl shadow-sm hover:bg-slate-50"><i data-lucide="x" class="w-5 h-5 text-slate-400"></i></button>
+            </div>
+            <form id="student-form" onsubmit="handleFormSubmit(event)" class="p-10 space-y-8 overflow-y-auto custom-scrollbar text-left">
+                <input type="hidden" id="edit-id">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                    <div class="space-y-6">
+                        <label class="text-[10px] font-black text-indigo-600 uppercase tracking-widest leading-none">Identity Verification</label>
+                        <div class="flex items-center gap-6">
+                            <div class="w-32 h-32 rounded-3xl bg-slate-100 border-2 border-dashed flex items-center justify-center relative overflow-hidden group"><img id="photo-preview" class="w-full h-full object-cover hidden"><div id="photo-placeholder" class="text-slate-300 text-center text-left"><i data-lucide="camera" class="w-8 h-8 mx-auto mb-1"></i><div class="text-[8px] font-black uppercase">Photo</div></div><input type="file" id="photo-upload" accept="image/*" onchange="previewFile(this, 'photo-preview')" class="absolute inset-0 opacity-0 cursor-pointer"></div>
+                            <div class="flex-1 space-y-4"><input type="text" id="name" required placeholder="Full Identity Name" class="w-full bg-slate-50 border p-4 rounded-2xl font-bold text-lg outline-none focus:border-indigo-500"><div class="grid grid-cols-2 gap-3"><div><label class="text-[9px] font-black text-slate-400 uppercase text-left">DOB</label><input type="date" id="dob" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-left"></div><div><label class="text-[9px] font-black text-slate-400 uppercase text-left">Aadhar Number</label><input type="text" id="aadhar-num" maxlength="12" pattern="\d{12}" placeholder="12-Digit No" class="w-full bg-slate-50 border p-3 rounded-xl font-bold tracking-widest outline-none"></div></div></div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div><label class="text-[9px] font-black text-indigo-600 uppercase ml-1">Register Pg</label><input type="text" id="register-pg" required placeholder="Page" class="w-full bg-slate-50 border p-3 rounded-xl font-black text-center text-indigo-600 uppercase focus:border-indigo-600 outline-none"></div>
+                            <div class="col-span-2 flex items-end gap-3 text-left"><div class="image-preview-box flex-1 text-left" onclick="document.getElementById('aadhar-front-upload').click()"><img id="aadhar-front-preview" class="hidden text-left"><div id="aadhar-front-placeholder" class="text-slate-300 text-[8px] font-bold text-center">Aadhar Front</div><input type="file" id="aadhar-front-upload" class="hidden text-left" onchange="previewFile(this, 'aadhar-front-preview')"></div><div class="image-preview-box flex-1 text-left" onclick="document.getElementById('aadhar-back-upload').click()"><img id="aadhar-back-preview" class="hidden text-left"><div id="aadhar-back-placeholder" class="text-slate-300 text-[8px] font-bold text-center">Aadhar Back</div><input type="file" id="aadhar-back-upload" class="hidden text-left" onchange="previewFile(this, 'aadhar-back-preview')"></div></div>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <label class="text-[10px] font-black text-indigo-600 uppercase tracking-widest text-left">Contact & Residency</label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><label class="text-[9px] font-black text-slate-400 uppercase">Mobile No</label><input type="tel" id="mobile" required oninput="handleMobileInput(this)" placeholder="10 Digit" class="w-full bg-slate-50 border p-3 rounded-xl font-bold"></div>
+                            <div><div class="flex justify-between items-center mb-1"><label class="text-[9px] font-black text-slate-400 uppercase">WhatsApp</label><label class="text-[8px] font-bold text-indigo-600 flex items-center gap-1 cursor-pointer"><input type="checkbox" id="sync-whatsapp" onchange="toggleWhatsappSync(this)"> Sync</label></div><input type="tel" id="whatsapp" required placeholder="WhatsApp No" class="w-full bg-slate-50 border p-3 rounded-xl font-bold"></div>
+                        </div>
+                        <div class="space-y-4">
+                            <textarea id="addr-c" required rows="1" placeholder="Correspondence Address" class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs outline-none" oninput="handleAddressSync()"></textarea>
+                            <label class="text-[8px] font-bold text-indigo-600 flex items-center gap-1 cursor-pointer ml-auto"><input type="checkbox" id="sync-address" onchange="handleAddressSync()"> Permanent residence same as above</label>
+                            <textarea id="addr-p" required rows="1" placeholder="Permanent Address" class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs outline-none"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t text-left">
+                    <div><label class="text-[9px] font-black text-slate-400 uppercase text-left">Shift</label><select id="shift" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1 outline-none text-left"><option value="7am-7pm">7am-7pm</option><option value="7am-10pm">7am-10pm</option><option value="4pm-10pm">4pm-10pm</option></select></div>
+                    <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left">Monthly Fee</label><input type="number" id="amount" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1"></div>
+                    <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left text-left">Start Date</label><input type="date" id="joining-date" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs mt-1"></div>
+                    <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left">Gateway</label><select id="pay-mode" class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1"><option value="UPI">UPI Digital</option><option value="Cash">Cash Liquid</option></select></div>
+                </div>
+                <button type="submit" class="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black shadow-xl active:scale-95 transition-all text-sm tracking-widest uppercase text-center">Save Cloud Record</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- REGISTRY -->
+    <div id="registry-overlay" class="fixed inset-0 z-[1000] flex flex-col bg-slate-50 translate-x-full transition-transform duration-500 shadow-2xl">
+        <div class="glass-header px-8 py-6 flex flex-col md:flex-row gap-6 justify-between items-center border-b">
+            <button onclick="closeRegistry()" class="p-3 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1"><button onclick="openRegistry('all')" id="tab-all" class="registry-tab">All</button><button onclick="openRegistry('active')" id="tab-active" class="registry-tab">Active</button><button onclick="openRegistry('pending')" id="tab-pending" class="registry-tab">Due</button></div>
+            <input type="text" id="registry-search" oninput="renderRegistry()" placeholder="Filter..." class="bg-white border px-6 py-3 rounded-2xl text-sm font-bold shadow-sm outline-none">
+        </div>
+        <div class="flex-1 overflow-y-auto px-8 py-10 custom-scrollbar text-left"><div class="max-w-4xl mx-auto bg-white rounded-[3rem] border shadow-2xl overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-slate-50 border-b"><th class="px-10 py-6 text-xs uppercase text-left">Member</th><th class="px-8 py-6 text-xs text-center uppercase">Cycle Date</th><th class="px-10 py-6 text-right uppercase">Actions</th></tr></thead><tbody id="registry-body" class="divide-y"></tbody></table></div></div>
+    </div>
+
+    <!-- PROFILE -->
+    <div id="profile-overlay" class="fixed inset-0 z-[1000] flex flex-col bg-slate-50 translate-x-full transition-transform duration-500 shadow-2xl">
+        <div class="glass-header px-8 py-6 flex justify-between items-center border-b">
+            <button onclick="closeProfile()" class="p-3 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
+            <h2 class="text-2xl font-black text-slate-900 uppercase">Student File</h2>
+            <div id="profile-status-badge"></div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-10 custom-scrollbar text-left"><div class="max-w-5xl mx-auto space-y-10">
+                <div class="bg-white rounded-[3.5rem] p-10 shadow-xl flex flex-col md:flex-row gap-10 items-center border">
+                    <div class="w-64 h-64 rounded-[3rem] bg-slate-100 overflow-hidden shadow-inner border-4 border-white flex items-center justify-center cursor-zoom-in" onclick="inspectImage('profile-view-photo')"><img id="profile-view-photo" class="w-full h-full object-cover"></div>
+                    <div class="flex-1">
+                        <h1 id="profile-view-name" class="text-5xl font-black text-slate-900 leading-none uppercase tracking-tighter">...</h1>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                            <div class="bg-slate-50 p-4 rounded-3xl text-center"><div class="text-[8px] font-black uppercase">Shift</div><div id="profile-view-shift" class="text-xs font-black">...</div></div>
+                            <div class="bg-slate-50 p-4 rounded-3xl border-2 border-indigo-100 text-center"><div class="text-[8px] font-black uppercase">Pg No</div><div id="profile-view-register" class="text-base font-black text-indigo-700">#--</div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-[3rem] shadow-xl overflow-hidden border">
+                    <div class="px-10 py-8 border-b bg-slate-50/50 flex justify-between items-center text-left"><h3>Ledger Log</h3></div>
+                    <div class="overflow-x-auto"><table class="w-full text-left"><thead><tr class="bg-slate-100/50"><th class="px-10 py-5 text-xs uppercase">Date</th><th class="px-10 py-5 text-xs uppercase">Amount</th><th class="px-10 py-5 text-xs uppercase text-center">Mode</th><th class="px-10 py-5 text-xs uppercase text-right">Status</th></tr></thead><tbody id="profile-history-body" class="divide-y"></tbody></table></div>
+                </div>
+            </div></div>
+    </div>
+
+    <!-- TOAST -->
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-3xl opacity-0 translate-y-10 transition-all z-[4000] font-black shadow-2xl">Info</div>
+
+</body>
+</html>
