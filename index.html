@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LibCommand Cloud v12.1 | Direct Access Terminal</title>
+    <title>LibCommand Cloud | Live Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -12,30 +12,16 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
 
-        // --- FIREBASE CONFIGURATION ---
-        // If you are deploying to GitHub, paste your Firebase config object below:
+        // --- YOUR FIREBASE CONFIGURATION (UPDATED) ---
         const manualConfig = {
-            apiKey: "",
-            authDomain: "",
-            projectId: "",
-            storageBucket: "",
-            messagingSenderId: "",
-            appId: ""
+            apiKey: "AIzaSyDDco9kK4uyTKnu0WCfviiJwy87gyUdRr0",
+            authDomain: "libmgmt-eccd3.firebaseapp.com",
+            projectId: "libmgmt-eccd3",
+            storageBucket: "libmgmt-eccd3.firebasestorage.app",
+            messagingSenderId: "601651929039",
+            appId: "1:601651929039:web:5af5b059469b5e15c3fcba",
+            measurementId: "G-5C1GL55476"
         };
-
-        let config;
-        try {
-            // Priority 1: Environment variable (if in the editor)
-            config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
-        } catch (e) {
-            config = manualConfig;
-        }
-
-        const app = initializeApp(config);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'lib-command-v121';
-        const publicPath = `artifacts/${appId}/public/data`;
 
         // --- GLOBAL STATE ---
         window.TOTAL_CAPACITY = 110;
@@ -43,7 +29,7 @@
         window.logs = [];
         window.currentRegistryFilter = 'all';
 
-        // --- CORE UI HELPERS ---
+        // --- UI HELPERS ---
         window.setUI = (id, val, attr = 'innerText') => {
             const el = document.getElementById(id);
             if (!el) return;
@@ -69,8 +55,13 @@
         };
 
         // --- CLOUD OPS ---
+        let db, auth, publicPath;
+
         window.cloudSave = async (coll, data, id = null) => {
-            if (!auth.currentUser) return false;
+            if (!db || !auth.currentUser) {
+                window.showToast("Local Mode: Not Synced");
+                return true; 
+            }
             try {
                 if (id) await setDoc(doc(db, publicPath, coll, id), data, { merge: true });
                 else await addDoc(collection(db, publicPath, coll), data);
@@ -82,7 +73,7 @@
         };
 
         window.cloudDelete = async (coll, id) => {
-            if (auth.currentUser) await deleteDoc(doc(db, publicPath, coll, id));
+            if (db && auth.currentUser) await deleteDoc(doc(db, publicPath, coll, id));
         };
 
         // --- DASHBOARD UI UPDATER ---
@@ -107,16 +98,16 @@
             }
 
             const totalRev = window.logs.reduce((a,l)=>a+(Number(l.amount)||0),0);
-            window.setUI('stat-revenue', `?${totalRev.toLocaleString()}`);
-            window.setUI('rev-upi', `?${window.logs.filter(l=>l.mode==='UPI').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
-            window.setUI('rev-cash', `?${window.logs.filter(l=>l.mode==='Cash').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
+            window.setUI('stat-revenue', `₹${totalRev.toLocaleString()}`);
+            window.setUI('rev-upi', `₹${window.logs.filter(l=>l.mode==='UPI').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
+            window.setUI('rev-cash', `₹${window.logs.filter(l=>l.mode==='Cash').reduce((a,l)=>a+(Number(l.amount)||0),0).toLocaleString()}`);
 
             const logCont = document.getElementById('activity-log');
             if(logCont) {
                 logCont.innerHTML = window.logs.slice(0, 10).map(l => `
                     <div class="flex justify-between items-center p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
-                        <div><div class="text-sm font-black text-slate-900 uppercase tracking-tighter">${l.name}</div><div class="text-[9px] font-bold text-slate-400 uppercase">Settled � ${l.date}</div></div>
-                        <div class="text-sm font-black text-indigo-600">?${l.amount}</div>
+                        <div><div class="text-sm font-black text-slate-900 uppercase tracking-tighter">${l.name}</div><div class="text-[9px] font-bold text-slate-400 uppercase">Settled • ${l.date}</div></div>
+                        <div class="text-sm font-black text-indigo-600">₹${l.amount}</div>
                     </div>
                 `).join('') || `<p class="py-10 text-center text-xs text-slate-300 font-bold uppercase">Cloud Journal Empty</p>`;
             }
@@ -138,27 +129,23 @@
             if(id) {
                 const s = window.students.find(x=>x.id===id);
                 if(s) {
-                    document.getElementById('name').value = s.name; 
-                    document.getElementById('amount').value = s.amount;
+                    document.getElementById('name').value = s.name || ''; 
+                    document.getElementById('amount').value = s.amount || 0;
                     document.getElementById('dob').value = s.dob || ''; 
                     document.getElementById('register-pg').value = s.registerPg || '';
                     document.getElementById('mobile').value = s.mobile || '';
                     document.getElementById('whatsapp').value = s.whatsapp || '';
-                    document.getElementById('emergency').value = s.emergency || '';
-                    document.getElementById('relation').value = s.relation || '';
                     document.getElementById('addr-c').value = s.addrC || '';
-                    document.getElementById('addr-p').value = s.addrP || '';
                     document.getElementById('pay-mode').value = s.payMode || 'UPI';
                     document.getElementById('shift').value = s.shift || '7am-7pm';
-                    document.getElementById('joining-date').value = s.joiningDate;
+                    document.getElementById('joining-date').value = s.joiningDate || '';
                     if(s.photo) {
                         const pp = document.getElementById('photo-preview');
                         if(pp) { pp.src = s.photo; pp.classList.remove('hidden'); document.getElementById('photo-placeholder')?.classList.add('hidden'); }
                     }
                 }
             } else {
-                const dateInp = document.getElementById('joining-date');
-                if(dateInp) dateInp.value = new Date().toISOString().split('T')[0];
+                document.getElementById('joining-date').value = new Date().toISOString().split('T')[0];
             }
             document.getElementById('modal')?.classList.remove('hidden');
         };
@@ -168,34 +155,32 @@
         window.handleFormSubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('edit-id').value;
-            window.showToast("Saving Digital Record...");
+            window.showToast("Saving to Cloud...");
             
             const data = {
                 name: document.getElementById('name').value, dob: document.getElementById('dob').value,
                 shift: document.getElementById('shift').value, amount: parseFloat(document.getElementById('amount').value),
                 registerPg: document.getElementById('register-pg').value, joiningDate: document.getElementById('joining-date').value,
                 mobile: document.getElementById('mobile').value, whatsapp: document.getElementById('whatsapp').value,
-                emergency: document.getElementById('emergency').value, relation: document.getElementById('relation').value,
-                addrC: document.getElementById('addr-c').value, addrP: document.getElementById('addr-p').value,
-                payMode: document.getElementById('pay-mode').value, active: true,
+                addrC: document.getElementById('addr-c').value, payMode: document.getElementById('pay-mode').value, active: true,
                 nextDue: window.calculateNext(document.getElementById('joining-date').value)
             };
 
-            const getProcessedImg = async (fid) => {
+            const processFile = async (fid) => {
                 const f = document.getElementById(fid).files[0];
                 if(!f) return null;
                 const b64 = await window.convertToBase64(f);
                 return await window.compressImage(b64);
             };
 
-            const p = await getProcessedImg('photo-upload'); if(p) data.photo = p;
-            const af = await getProcessedImg('aadhar-front-upload'); if(af) data.aadharFront = af;
-            const ab = await getProcessedImg('aadhar-back-upload'); if(ab) data.aadharBack = ab;
+            const p = await processFile('photo-upload'); if(p) data.photo = p;
+            const af = await processFile('aadhar-front-upload'); if(af) data.aadharFront = af;
+            const ab = await processFile('aadhar-back-upload'); if(ab) data.aadharBack = ab;
 
             if (await window.cloudSave('students', data, id || null)) {
                 if(!id) await window.cloudSave('logs', { name: data.name, amount: data.amount, mode: data.payMode, date: data.joiningDate, staff: "System" });
                 window.closeModal();
-                window.showToast("Cloud Record Secured");
+                window.showToast("Sync Successful");
             }
         };
 
@@ -207,7 +192,7 @@
             const q = qEl.value.toLowerCase();
             const today = new Date(); today.setHours(0,0,0,0);
             let filtered = window.students.filter(s => {
-                const m = s.name.toLowerCase().includes(q) || (s.registerPg && s.registerPg.includes(q));
+                const m = s.name.toLowerCase().includes(q) || (s.registerPg && s.registerPg.toString().includes(q));
                 if (window.currentRegistryFilter === 'active') return s.active && m;
                 if (window.currentRegistryFilter === 'pending') return s.active && (new Date(s.nextDue) <= today) && m;
                 return m;
@@ -216,7 +201,7 @@
             if(body) {
                 body.innerHTML = filtered.map(s => `
                     <tr class="hover:bg-slate-50 transition-colors border-b">
-                        <td class="px-10 py-6"><div onclick="window.openProfile('${s.id}')" class="font-black text-slate-900 cursor-pointer hover:text-indigo-600 uppercase tracking-tighter">${s.name}</div><div class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">PG ${s.registerPg || '--'} � ${s.shift}</div></td>
+                        <td class="px-10 py-6"><div onclick="window.openProfile('${s.id}')" class="font-black text-slate-900 cursor-pointer hover:text-indigo-600 uppercase tracking-tighter">${s.name}</div><div class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">PG ${s.registerPg || '--'} • ${s.shift}</div></td>
                         <td class="px-8 py-6 text-center font-bold text-xs text-slate-500">${new Date(s.nextDue).toLocaleDateString()}</td>
                         <td class="px-10 py-6 text-right"><div class="flex justify-end gap-2"><button onclick="window.openModal('${s.id}')" class="p-2 border rounded-xl hover:bg-slate-50 transition-all"><i data-lucide="edit-3" class="w-4 h-4 text-slate-400"></i></button><button onclick="window.deleteStudent('${s.id}')" class="p-2 border rounded-xl hover:bg-rose-50 transition-all text-rose-300 hover:text-rose-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></td>
                     </tr>
@@ -232,13 +217,8 @@
             window.setUI('profile-view-register', `#${s.registerPg || '--'}`);
             window.setUI('profile-view-shift', s.shift);
             window.setUI('profile-view-dob', s.dob || 'N/A');
-            window.setUI('profile-view-aadhar', s.aadharNum || 'N/A');
             window.setUI('profile-view-mobile', s.mobile || 'N/A');
-            window.setUI('profile-view-whatsapp', s.whatsapp || 'N/A');
-            window.setUI('profile-view-emergency-num', s.emergency || 'N/A');
-            window.setUI('profile-view-emergency-rel', s.relation || 'N/A');
             window.setUI('profile-view-addr-c', s.addrC || 'N/A');
-            window.setUI('profile-view-addr-p', s.addrP || 'N/A');
             
             const setImg = (id, src) => {
                 const img = document.getElementById(id);
@@ -251,7 +231,7 @@
             const hist = window.logs.filter(l => l.name === s.name);
             const histBody = document.getElementById('profile-history-body');
             if(histBody) {
-                histBody.innerHTML = hist.map(l => `<tr><td class="px-10 py-5 text-sm font-bold text-slate-700">${l.date}</td><td class="px-10 py-5 text-sm font-black text-slate-900">?${l.amount}</td><td class="px-10 py-5 text-center"><span class="px-3 py-1 rounded-lg border text-[9px] font-black uppercase ${l.mode==='UPI'?'text-blue-500 bg-blue-50':'text-emerald-500 bg-emerald-50'}">${l.mode}</span></td><td class="px-10 py-5 text-right text-xs font-bold text-slate-400">Verified</td></tr>`).join('');
+                histBody.innerHTML = hist.map(l => `<tr><td class="px-10 py-5 text-sm font-bold text-slate-700">${l.date}</td><td class="px-10 py-5 text-sm font-black text-slate-900">₹${l.amount}</td><td class="px-10 py-5 text-center"><span class="px-3 py-1 rounded-lg border text-[9px] font-black uppercase ${l.mode==='UPI'?'text-blue-500 bg-blue-50':'text-emerald-500 bg-emerald-50'}">${l.mode}</span></td><td class="px-10 py-5 text-right text-xs font-bold text-slate-400">Verified</td></tr>`).join('');
             }
             
             const today = new Date(); today.setHours(0,0,0,0);
@@ -263,7 +243,7 @@
         };
 
         // --- HELPERS ---
-        window.deleteStudent = async (id) => { if (confirm("Erase dossier from Cloud?")) await window.cloudDelete('students', id); };
+        window.deleteStudent = async (id) => { if (confirm("Delete permanent cloud record?")) await window.cloudDelete('students', id); };
         window.closeProfile = () => { document.getElementById('profile-overlay')?.classList.remove('active-overlay'); };
         window.inspectImage = (id) => { const src = document.getElementById(id)?.src; if(!src) return; const win = window.open(); win.document.write(`<style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:90%;max-height:90%; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,0.5);}</style><img src="${src}">`); };
         window.convertToBase64 = (f) => { return new Promise(r => { const rd = new FileReader(); rd.onload = e => r(rd.result); rd.readAsDataURL(f); }); };
@@ -275,6 +255,7 @@
 
         // --- STARTUP ---
         function setupListeners() {
+            if(!db) return;
             onSnapshot(collection(db, publicPath, 'students'), (snap) => {
                 window.students = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.refreshDashboard();
@@ -287,31 +268,48 @@
         }
         
         async function runAutoAuth() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-                else await signInAnonymously(auth);
-                
-                const dash = document.getElementById('dashboard-view');
+            // REVEAL UI IMMEDIATELY
+            const dash = document.getElementById('dashboard-view');
+            if (dash) {
                 dash.classList.remove('hidden');
                 setTimeout(() => dash.classList.add('opacity-100'), 100);
-                document.body.classList.remove('overflow-hidden');
-                
-                setupListeners();
-                window.showToast("Cloud Terminal Connected");
-            } catch (error) { 
-                console.error("Auth Fail:", error); 
-                window.showToast("Check Firebase Config");
             }
+            document.body.classList.remove('overflow-hidden');
+
+            try {
+                let currentConfig;
+                try {
+                    currentConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
+                } catch(e) { currentConfig = manualConfig; }
+
+                if (currentConfig.apiKey) {
+                    const appInstance = initializeApp(currentConfig);
+                    db = getFirestore(appInstance);
+                    auth = getAuth(appInstance);
+                    const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'lib-mgmt-eccd3';
+                    publicPath = `artifacts/${currentAppId}/public/data`;
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                    else await signInAnonymously(auth);
+                    
+                    setupListeners();
+                    window.showToast("Cloud Connected");
+                }
+            } catch (error) { 
+                console.error("Connection Error:", error); 
+                window.showToast("Local View Active");
+            }
+            window.refreshDashboard();
         }
         runAutoAuth();
     </script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; letter-spacing: -0.02em; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; letter-spacing: -0.02em; margin:0; padding:0; }
         .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid #e2e8f0; }
-        .stat-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
-        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); background: white; }
+        .stat-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; border: 1px solid #f1f5f9; background: white; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
         .custom-scrollbar::-webkit-scrollbar { width: 5px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .active-overlay { transform: translateX(0) !important; }
@@ -323,7 +321,7 @@
         .image-preview-box img { width: 100%; height: 100%; object-fit: cover; }
     </style>
 </head>
-<body class="text-slate-900 min-h-screen overflow-hidden"> 
+<body class="text-slate-900 min-h-screen"> 
 
     <div id="dashboard-view" class="hidden opacity-0 transition-all duration-700 min-h-screen">
         <nav class="glass-header sticky top-0 z-40 px-6 py-4">
@@ -332,21 +330,21 @@
                     <div class="bg-indigo-600 p-2.5 rounded-2xl shadow-lg"><i data-lucide="layout" class="w-5 h-5 text-white"></i></div>
                     <div class="text-left leading-none"><h1 class="text-sm font-extrabold tracking-tight text-slate-900 uppercase">LibCommand <span class="text-indigo-600">Cloud</span></h1><p class="text-[9px] font-black text-slate-400 uppercase mt-1">Live Terminal</p></div>
                 </div>
-                <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-[1.5rem] font-black text-xs flex items-center gap-3 shadow-xl transition-all hover:scale-105 active:scale-95 group"><i data-lucide="user-plus" class="w-5 h-4"></i> ENROLL STUDENT</button>
+                <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-[1.5rem] font-black text-xs flex items-center gap-3 shadow-xl transition-all hover:scale-105 active:scale-95 group"><i data-lucide="user-plus" class="w-5 h-4"></i> ADD NEW STUDENT</button>
             </div>
         </nav>
 
         <main class="max-w-7xl mx-auto px-6 py-8">
             <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm mb-8 flex flex-col md:flex-row items-center gap-8">
-                <div class="flex-1 text-left"><h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 leading-none">Seat Occupancy Monitor</h3><div class="flex items-baseline gap-3 mb-5 text-left"><span id="stat-seats-left" class="text-5xl font-black text-indigo-600 leading-none">0</span><span class="text-lg font-bold text-slate-400 text-left">Open Slots</span></div><div class="capacity-bar w-full"><div id="stat-capacity-progress" class="capacity-fill bg-indigo-600 w-0"></div></div></div>
+                <div class="flex-1 text-left"><h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 leading-none">Global Occupancy Monitor</h3><div class="flex items-baseline gap-3 mb-5 text-left"><span id="stat-seats-left" class="text-5xl font-black text-indigo-600 leading-none">0</span><span class="text-lg font-bold text-slate-400 text-left">Open Slots</span></div><div class="capacity-bar w-full"><div id="stat-capacity-progress" class="capacity-fill bg-indigo-600 w-0"></div></div></div>
                 <div class="bg-slate-50 px-8 py-6 rounded-3xl border border-slate-100 text-center min-w-[150px]"><div class="text-[10px] font-black text-slate-400 uppercase mb-1 leading-none text-center">Active Students</div><div class="text-2xl font-black text-slate-800 text-center"><span id="stat-active-count">0</span> / 110</div></div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-blue-50 text-blue-600 rounded-xl w-fit mb-4"><i data-lucide="users" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Total Enrolled</h3><div id="stat-total" class="text-3xl font-black text-slate-800">0</div></div>
-                <div onclick="openRegistry('active')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl w-fit mb-4"><i data-lucide="user-check" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Currently Active</h3><div id="stat-active" class="text-3xl font-black text-emerald-600">0</div></div>
-                <div onclick="openRegistry('pending')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-rose-50 text-rose-600 rounded-xl w-fit mb-4"><i data-lucide="alert-triangle" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Fees Due</h3><div id="stat-pending" class="text-3xl font-black text-rose-600">0</div></div>
-                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] border border-slate-100 text-left"><div class="p-3 bg-slate-100 text-slate-400 rounded-xl w-fit mb-4"><i data-lucide="archive" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Database Access</h3><div class="text-3xl font-black text-slate-400 uppercase">View</div></div>
+                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] text-left"><div class="p-3 bg-blue-50 text-blue-600 rounded-xl w-fit mb-4"><i data-lucide="users" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Total Enrolled</h3><div id="stat-total" class="text-3xl font-black text-slate-800">0</div></div>
+                <div onclick="openRegistry('active')" class="stat-card p-6 rounded-[2.5rem] text-left"><div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl w-fit mb-4"><i data-lucide="user-check" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Currently Active</h3><div id="stat-active" class="text-2xl font-black text-emerald-600">0</div></div>
+                <div onclick="openRegistry('pending')" class="stat-card p-6 rounded-[2.5rem] text-left"><div class="p-3 bg-rose-50 text-rose-600 rounded-xl w-fit mb-4"><i data-lucide="alert-triangle" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Fees Due</h3><div id="stat-pending" class="text-3xl font-black text-rose-600">0</div></div>
+                <div onclick="openRegistry('all')" class="stat-card p-6 rounded-[2.5rem] text-left"><div class="p-3 bg-slate-100 text-slate-400 rounded-xl w-fit mb-4"><i data-lucide="archive" class="w-5 h-5"></i></div><h3 class="text-[10px] font-bold text-slate-400 uppercase mb-1">Database Access</h3><div class="text-3xl font-black text-slate-400 uppercase">View</div></div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -354,10 +352,10 @@
                     <div class="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white text-left">
                         <h3 class="text-xs font-black uppercase mb-4 opacity-60 tracking-widest">Revenue Tracker</h3>
                         <select id="rev-date-filter" onchange="handleRevenueFilterChange()" class="w-full bg-slate-800 border-none rounded-xl px-4 py-2.5 text-[10px] font-black text-slate-300 outline-none mb-4"><option value="all">Lifetime Total</option><option value="today">Today Only</option><option value="month">Current Month</option></select>
-                        <div id="stat-revenue" class="text-3xl font-black mb-6 tracking-tight">?0</div>
+                        <div id="stat-revenue" class="text-3xl font-black mb-6 tracking-tight">₹0</div>
                         <div class="space-y-3 pt-6 border-t border-slate-800">
-                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">UPI Digital</span><span id="rev-upi" class="text-blue-400">?0</span></div>
-                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">Cash Reserve</span><span id="rev-cash" class="text-emerald-400">?0</span></div>
+                            <div class="flex justify-between items-center text-[10px] font-bold text-left"><span class="text-slate-400 uppercase text-left">UPI Digital</span><span id="rev-upi" class="text-blue-400">₹0</span></div>
+                            <div class="flex justify-between items-center text-[10px] font-bold text-left"><span class="text-slate-400 uppercase text-left">Cash Reserve</span><span id="rev-cash" class="text-emerald-400">₹0</span></div>
                         </div>
                     </div>
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm text-left"><h3 class="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> Active Shifts</h3><div id="shift-load-container" class="space-y-3"></div></div>
@@ -411,7 +409,7 @@
                     <div><label class="text-[9px] font-black text-slate-400 uppercase text-left">Shift</label><select id="shift" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1 outline-none text-left"><option value="7am-7pm">7am-7pm</option><option value="7am-10pm">7am-10pm</option><option value="4pm-10pm">4pm-10pm</option></select></div>
                     <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left">Monthly Fee</label><input type="number" id="amount" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1"></div>
                     <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left text-left">Start Date</label><input type="date" id="joining-date" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-xs mt-1"></div>
-                    <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left">Gateway</label><select id="pay-mode" class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1"><option value="UPI">UPI Digital</option><option value="Cash">Cash Liquid</option></select></div>
+                    <div><label class="text-[9px] font-black text-slate-400 uppercase leading-none text-left">Gateway</label><select id="pay-mode" class="w-full bg-slate-50 border p-3 rounded-xl font-bold mt-1 text-left"><option value="UPI">UPI Digital</option><option value="Cash">Cash Liquid</option></select></div>
                 </div>
                 <button type="submit" class="w-full py-5 bg-indigo-600 text-white rounded-3xl font-black shadow-xl active:scale-95 transition-all text-sm tracking-widest uppercase text-center">Save Cloud Record</button>
             </form>
@@ -420,7 +418,7 @@
 
     <!-- REGISTRY -->
     <div id="registry-overlay" class="fixed inset-0 z-[1000] flex flex-col bg-slate-50 translate-x-full transition-transform duration-500 shadow-2xl">
-        <div class="glass-header px-8 py-6 flex flex-col md:flex-row gap-6 justify-between items-center border-b">
+        <div class="glass-header px-8 py-6 flex flex-col md:flex-row gap-6 justify-between items-center border-b shadow-sm">
             <button onclick="closeRegistry()" class="p-3 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
             <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1"><button onclick="openRegistry('all')" id="tab-all" class="registry-tab">All</button><button onclick="openRegistry('active')" id="tab-active" class="registry-tab">Active</button><button onclick="openRegistry('pending')" id="tab-pending" class="registry-tab">Due</button></div>
             <input type="text" id="registry-search" oninput="renderRegistry()" placeholder="Filter..." class="bg-white border px-6 py-3 rounded-2xl text-sm font-bold shadow-sm outline-none">
