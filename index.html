@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LibCommand Cloud | Live Terminal</title>
+    <title>LibCommand Cloud | Direct Access Terminal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
@@ -12,15 +12,14 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
 
-        // --- YOUR FIREBASE CONFIGURATION (INTEGRATED FOR GITHUB) ---
+        // --- FIREBASE CONFIGURATION (YOUR ACCOUNT) ---
         const manualConfig = {
             apiKey: "AIzaSyDDco9kK4uyTKnu0WCfviiJwy87gyUdRr0",
             authDomain: "libmgmt-eccd3.firebaseapp.com",
             projectId: "libmgmt-eccd3",
             storageBucket: "libmgmt-eccd3.firebasestorage.app",
             messagingSenderId: "601651929039",
-            appId: "1:601651929039:web:5af5b059469b5e15c3fcba",
-            measurementId: "G-5C1GL55476"
+            appId: "1:601651929039:web:5af5b059469b5e15c3fcba"
         };
 
         // --- GLOBAL STATE ---
@@ -28,6 +27,19 @@
         window.students = [];
         window.logs = [];
         window.currentRegistryFilter = 'all';
+
+        // Initialize Firebase
+        let config;
+        try {
+            config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
+        } catch (e) {
+            config = manualConfig;
+        }
+
+        const app = initializeApp(config);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'libmgmt-eccd3';
 
         // --- UI HELPERS ---
         window.setUI = (id, val, attr = 'innerText') => {
@@ -54,27 +66,29 @@
             return date.toISOString().split('T')[0];
         };
 
-        // --- CLOUD OPS ---
-        let db, auth, publicPath;
-
-        window.cloudSave = async (coll, data, id = null) => {
-            if (!db || !auth.currentUser) {
-                window.showToast("Error: Cloud Not Connected");
-                return false; 
-            }
+        // --- CLOUD CRUD ---
+        window.cloudSave = async (collName, data, id = null) => {
+            if (!auth.currentUser) return false;
+            // RULE 1: Strict Path Implementation
+            const path = `artifacts/${appId}/public/data/${collName}`;
             try {
-                if (id) await setDoc(doc(db, publicPath, coll, id), data, { merge: true });
-                else await addDoc(collection(db, publicPath, coll), data);
+                if (id) {
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, id), data, { merge: true });
+                } else {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', collName), data);
+                }
                 return true;
             } catch (e) { 
                 console.error("Cloud Error:", e);
-                window.showToast("Permission Denied or Sync Error");
+                window.showToast("Cloud Sync Error");
                 return false; 
             }
         };
 
-        window.cloudDelete = async (coll, id) => {
-            if (db && auth.currentUser) await deleteDoc(doc(db, publicPath, coll, id));
+        window.cloudDelete = async (collName, id) => {
+            if (auth.currentUser) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, id));
+            }
         };
 
         // --- DASHBOARD UI UPDATER ---
@@ -105,17 +119,17 @@
 
             const logCont = document.getElementById('activity-log');
             if(logCont) {
-                logCont.innerHTML = window.logs.slice(0, 10).map(l => `
+                logCont.innerHTML = window.logs.slice(0, 12).map(l => `
                     <div class="flex justify-between items-center p-4 bg-white rounded-2xl border border-slate-100 shadow-sm">
-                        <div><div class="text-sm font-black text-slate-900 uppercase tracking-tighter">${l.name}</div><div class="text-[9px] font-bold text-slate-400 uppercase">Settled • ${l.date}</div></div>
+                        <div><div class="text-sm font-black text-slate-900 uppercase tracking-tighter">${l.name}</div><div class="text-[9px] font-bold text-slate-400 uppercase">Paid • ${l.date}</div></div>
                         <div class="text-sm font-black text-indigo-600">₹${l.amount}</div>
                     </div>
-                `).join('') || `<p class="py-10 text-center text-xs text-slate-300 font-bold uppercase">Cloud Journal Empty</p>`;
+                `).join('') || `<p class="py-10 text-center text-xs text-slate-300 font-bold uppercase">No records found</p>`;
             }
             lucide.createIcons();
         };
 
-        // --- STUDENT MODAL & IMAGE HANDLING ---
+        // --- STUDENT MODAL ---
         window.openModal = (id = null) => {
             const form = document.getElementById('student-form');
             if(form) form.reset();
@@ -156,7 +170,7 @@
         window.handleFormSubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('edit-id').value;
-            window.showToast("Saving to Cloud...");
+            window.showToast("Saving Digital Record...");
             
             const data = {
                 name: document.getElementById('name').value, dob: document.getElementById('dob').value,
@@ -181,7 +195,7 @@
             if (await window.cloudSave('students', data, id || null)) {
                 if(!id) await window.cloudSave('logs', { name: data.name, amount: data.amount, mode: data.payMode, date: data.joiningDate, staff: "System" });
                 window.closeModal();
-                window.showToast("Sync Successful");
+                window.showToast("Cloud Record Secured");
             }
         };
 
@@ -243,7 +257,7 @@
             lucide.createIcons();
         };
 
-        // --- HELPERS ---
+        // --- UTILS ---
         window.deleteStudent = async (id) => { if (confirm("Delete permanent cloud record?")) await window.cloudDelete('students', id); };
         window.closeProfile = () => { document.getElementById('profile-overlay')?.classList.remove('active-overlay'); };
         window.inspectImage = (id) => { const src = document.getElementById(id)?.src; if(!src) return; const win = window.open(); win.document.write(`<style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:90%;max-height:90%; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,0.5);}</style><img src="${src}">`); };
@@ -254,15 +268,17 @@
         window.handleAddressSync = () => { if (document.getElementById('sync-address')?.checked) document.getElementById('addr-p').value = document.getElementById('addr-c').value; };
         window.handleRevenueFilterChange = () => { window.refreshDashboard(); };
 
-        // --- STARTUP ---
+        // --- STARTUP LOGIC ---
         function setupListeners() {
-            if(!db) return;
-            onSnapshot(collection(db, publicPath, 'students'), (snap) => {
+            // Students
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'students'), (snap) => {
                 window.students = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.refreshDashboard();
                 window.renderRegistry();
-            });
-            onSnapshot(collection(db, publicPath, 'logs'), (snap) => {
+            }, (err) => console.error("PermissionDenied Fix Applied. Connection Refused by Firebase Security Rules. Check appId matches Project."));
+
+            // Logs
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snap) => {
                 window.logs = snap.docs.map(doc => doc.data()).sort((a,b) => new Date(b.date) - new Date(a.date));
                 window.refreshDashboard();
             });
@@ -278,27 +294,20 @@
             document.body.classList.remove('overflow-hidden');
 
             try {
-                let currentConfig;
-                try {
-                    currentConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
-                } catch(e) { currentConfig = manualConfig; }
-
-                if (currentConfig.apiKey) {
-                    const appInstance = initializeApp(currentConfig);
-                    db = getFirestore(appInstance);
-                    auth = getAuth(appInstance);
-                    // Use YOUR specific appId
-                    const currentAppId = 'libmgmt-eccd3';
-                    publicPath = `artifacts/${currentAppId}/public/data`;
-
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
-                    else await signInAnonymously(auth);
-                    
-                    setupListeners();
-                    window.showToast("Cloud Connected");
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
                 }
+                
+                // CRITICAL: Await Auth complete before setting up listeners
+                onAuthStateChanged(auth, (user) => {
+                    if (user) setupListeners();
+                });
+                
+                window.showToast("Cloud Terminal Connected");
             } catch (error) { 
-                console.error("Connection Error:", error); 
+                console.error("Auth Fail:", error); 
                 window.showToast("Local View Active");
             }
             window.refreshDashboard();
@@ -422,7 +431,7 @@
     <div id="registry-overlay" class="fixed inset-0 z-[1000] flex flex-col bg-slate-50 translate-x-full transition-transform duration-500 shadow-2xl">
         <div class="glass-header px-8 py-6 flex flex-col md:flex-row gap-6 justify-between items-center border-b shadow-sm">
             <button onclick="closeRegistry()" class="p-3 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-6 h-6"></i></button>
-            <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1"><button onclick="openRegistry('all')" id="tab-all" class="registry-tab">All</button><button onclick="openRegistry('active')" id="tab-active" class="registry-tab">Active</button><button onclick="openRegistry('pending')" id="tab-pending" class="registry-tab">Due</button></div>
+            <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1 shadow-inner"><button onclick="openRegistry('all')" id="tab-all" class="registry-tab">All</button><button onclick="openRegistry('active')" id="tab-active" class="registry-tab">Active</button><button onclick="openRegistry('pending')" id="tab-pending" class="registry-tab">Due</button></div>
             <input type="text" id="registry-search" oninput="renderRegistry()" placeholder="Filter..." class="bg-white border px-6 py-3 rounded-2xl text-sm font-bold shadow-sm outline-none">
         </div>
         <div class="flex-1 overflow-y-auto px-8 py-10 custom-scrollbar text-left"><div class="max-w-4xl mx-auto bg-white rounded-[3rem] border shadow-2xl overflow-hidden"><table class="w-full text-left"><thead><tr class="bg-slate-50 border-b"><th class="px-10 py-6 text-xs uppercase text-left">Member</th><th class="px-8 py-6 text-xs text-center uppercase">Cycle Date</th><th class="px-10 py-6 text-right uppercase">Actions</th></tr></thead><tbody id="registry-body" class="divide-y"></tbody></table></div></div>
