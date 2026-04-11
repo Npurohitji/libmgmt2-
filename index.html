@@ -66,11 +66,51 @@
             return date.toISOString().split('T')[0];
         };
 
+        // --- IMAGE HANDLING HELPERS ---
+        window.previewFile = (input, pid) => {
+            const f = input.files[0];
+            if (f) {
+                const r = new FileReader();
+                r.onload = e => {
+                    const img = document.getElementById(pid);
+                    if(img) {
+                        img.src = e.target.result;
+                        img.classList.remove('hidden');
+                        const ph = document.getElementById(pid.replace('preview', 'placeholder'));
+                        if(ph) ph.classList.add('hidden');
+                    }
+                };
+                r.readAsDataURL(f);
+            }
+        };
+
+        window.convertToBase64 = (f) => { 
+            return new Promise(r => { 
+                const rd = new FileReader(); 
+                rd.onload = e => r(rd.result); 
+                rd.readAsDataURL(f); 
+            }); 
+        };
+
+        window.compressImage = async (b64, maxWidth = 400) => {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.src = b64;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let w = img.width, h = img.height;
+                    if (w > maxWidth) { h *= maxWidth / w; w = maxWidth; }
+                    canvas.width = w; canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    resolve(canvas.toDataURL('image/jpeg', 0.7));
+                };
+            });
+        };
+
         // --- CLOUD CRUD ---
         window.cloudSave = async (collName, data, id = null) => {
             if (!auth.currentUser) return false;
-            // RULE 1: Strict Path Implementation
-            const path = `artifacts/${appId}/public/data/${collName}`;
             try {
                 if (id) {
                     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', collName, id), data, { merge: true });
@@ -158,6 +198,14 @@
                         const pp = document.getElementById('photo-preview');
                         if(pp) { pp.src = s.photo; pp.classList.remove('hidden'); document.getElementById('photo-placeholder')?.classList.add('hidden'); }
                     }
+                    if(s.aadharFront) {
+                        const af = document.getElementById('aadhar-front-preview');
+                        if(af) { af.src = s.aadharFront; af.classList.remove('hidden'); document.getElementById('aadhar-front-placeholder')?.classList.add('hidden'); }
+                    }
+                    if(s.aadharBack) {
+                        const ab = document.getElementById('aadhar-back-preview');
+                        if(ab) { ab.src = s.aadharBack; ab.classList.remove('hidden'); document.getElementById('aadhar-back-placeholder')?.classList.add('hidden'); }
+                    }
                 }
             } else {
                 document.getElementById('joining-date').value = new Date().toISOString().split('T')[0];
@@ -182,7 +230,8 @@
             };
 
             const processFile = async (fid) => {
-                const f = document.getElementById(fid).files[0];
+                const el = document.getElementById(fid);
+                const f = el.files[0];
                 if(!f) return null;
                 const b64 = await window.convertToBase64(f);
                 return await window.compressImage(b64);
@@ -261,8 +310,6 @@
         window.deleteStudent = async (id) => { if (confirm("Delete permanent cloud record?")) await window.cloudDelete('students', id); };
         window.closeProfile = () => { document.getElementById('profile-overlay')?.classList.remove('active-overlay'); };
         window.inspectImage = (id) => { const src = document.getElementById(id)?.src; if(!src) return; const win = window.open(); win.document.write(`<style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;}img{max-width:90%;max-height:90%; border-radius: 20px; box-shadow: 0 0 50px rgba(0,0,0,0.5);}</style><img src="${src}">`); };
-        window.convertToBase64 = (f) => { return new Promise(r => { const rd = new FileReader(); rd.onload = e => r(rd.result); rd.readAsDataURL(f); }); };
-        window.compressImage = async (b64) => { return new Promise(r => { const img = new Image(); img.src = b64; img.onload = () => { const cv = document.createElement('canvas'); let w = img.width, h = img.height; if (w > 400) { h *= 400 / w; w = 400; } cv.width = w; cv.height = h; cv.getContext('2d').drawImage(img, 0,0,w,h); r(cv.toDataURL('image/jpeg', 0.6)); }; }); };
         window.handleMobileInput = (el) => { if (document.getElementById('sync-whatsapp')?.checked) document.getElementById('whatsapp').value = el.value; };
         window.toggleWhatsappSync = (checkbox) => { if (checkbox.checked) document.getElementById('whatsapp').value = document.getElementById('mobile').value; };
         window.handleAddressSync = () => { if (document.getElementById('sync-address')?.checked) document.getElementById('addr-p').value = document.getElementById('addr-c').value; };
@@ -270,14 +317,11 @@
 
         // --- STARTUP LOGIC ---
         function setupListeners() {
-            // Students
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'students'), (snap) => {
                 window.students = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.refreshDashboard();
                 window.renderRegistry();
-            }, (err) => console.error("PermissionDenied Fix Applied. Connection Refused by Firebase Security Rules. Check appId matches Project."));
-
-            // Logs
+            });
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snap) => {
                 window.logs = snap.docs.map(doc => doc.data()).sort((a,b) => new Date(b.date) - new Date(a.date));
                 window.refreshDashboard();
@@ -285,27 +329,22 @@
         }
         
         async function runAutoAuth() {
-            // REVEAL UI IMMEDIATELY
-            const dash = document.getElementById('dashboard-view');
-            if (dash) {
-                dash.classList.remove('hidden');
-                setTimeout(() => dash.classList.add('opacity-100'), 100);
-            }
-            document.body.classList.remove('overflow-hidden');
-
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+                else await signInAnonymously(auth);
                 
-                // CRITICAL: Await Auth complete before setting up listeners
                 onAuthStateChanged(auth, (user) => {
-                    if (user) setupListeners();
+                    if (user) {
+                        setupListeners();
+                        const dash = document.getElementById('dashboard-view');
+                        if (dash) {
+                            dash.classList.remove('hidden');
+                            setTimeout(() => dash.classList.add('opacity-100'), 100);
+                        }
+                        document.body.classList.remove('overflow-hidden');
+                        window.showToast("Cloud Terminal Connected");
+                    }
                 });
-                
-                window.showToast("Cloud Terminal Connected");
             } catch (error) { 
                 console.error("Auth Fail:", error); 
                 window.showToast("Local View Active");
@@ -332,7 +371,7 @@
         .image-preview-box img { width: 100%; height: 100%; object-fit: cover; }
     </style>
 </head>
-<body class="text-slate-900 min-h-screen"> 
+<body class="text-slate-900 min-h-screen overflow-hidden"> 
 
     <div id="dashboard-view" class="hidden opacity-0 transition-all duration-700 min-h-screen">
         <nav class="glass-header sticky top-0 z-40 px-6 py-4">
@@ -448,7 +487,7 @@
                 <div class="bg-white rounded-[3.5rem] p-10 shadow-xl flex flex-col md:flex-row gap-10 items-center border">
                     <div class="w-64 h-64 rounded-[3rem] bg-slate-100 overflow-hidden shadow-inner border-4 border-white flex items-center justify-center cursor-zoom-in" onclick="inspectImage('profile-view-photo')"><img id="profile-view-photo" class="w-full h-full object-cover"></div>
                     <div class="flex-1">
-                        <h1 id="profile-view-name" class="text-5xl font-black text-slate-900 leading-none uppercase tracking-tighter">...</h1>
+                        <h1 id="profile-view-name" class="text-5xl font-black text-slate-900 leading-none uppercase tracking-tighter text-left">...</h1>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                             <div class="bg-slate-50 p-4 rounded-3xl text-center"><div class="text-[8px] font-black uppercase">Shift</div><div id="profile-view-shift" class="text-xs font-black">...</div></div>
                             <div class="bg-slate-50 p-4 rounded-3xl border-2 border-indigo-100 text-center"><div class="text-[8px] font-black uppercase">Pg No</div><div id="profile-view-register" class="text-base font-black text-indigo-700">#--</div></div>
