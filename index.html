@@ -12,14 +12,15 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
 
-        // --- FIREBASE CONFIGURATION (YOUR ACCOUNT) ---
+        // --- FIREBASE CONFIGURATION (PASTED FROM YOUR ACCOUNT) ---
         const manualConfig = {
             apiKey: "AIzaSyDDco9kK4uyTKnu0WCfviiJwy87gyUdRr0",
             authDomain: "libmgmt-eccd3.firebaseapp.com",
             projectId: "libmgmt-eccd3",
             storageBucket: "libmgmt-eccd3.firebasestorage.app",
             messagingSenderId: "601651929039",
-            appId: "1:601651929039:web:5af5b059469b5e15c3fcba"
+            appId: "1:601651929039:web:5af5b059469b5e15c3fcba",
+            measurementId: "G-5C1GL55476"
         };
 
         // --- GLOBAL STATE ---
@@ -31,6 +32,7 @@
         // Initialize Firebase
         let config;
         try {
+            // Priority 1: Environment variable (Internal), Priority 2: Manual Config (External/GitHub)
             config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
         } catch (e) {
             config = manualConfig;
@@ -330,6 +332,7 @@
         
         async function runAutoAuth() {
             try {
+                // Background sign-in
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
                 else await signInAnonymously(auth);
                 
@@ -342,12 +345,15 @@
                             setTimeout(() => dash.classList.add('opacity-100'), 100);
                         }
                         document.body.classList.remove('overflow-hidden');
-                        window.showToast("Cloud Terminal Connected");
+                        window.showToast("Cloud Connected");
                     }
                 });
             } catch (error) { 
                 console.error("Auth Fail:", error); 
-                window.showToast("Local View Active");
+                // Fallback reveal even on failure so user sees UI
+                document.getElementById('dashboard-view')?.classList.remove('hidden');
+                document.getElementById('dashboard-view')?.classList.add('opacity-100');
+                window.showToast("Local Terminal Active");
             }
             window.refreshDashboard();
         }
@@ -404,8 +410,8 @@
                         <select id="rev-date-filter" onchange="handleRevenueFilterChange()" class="w-full bg-slate-800 border-none rounded-xl px-4 py-2.5 text-[10px] font-black text-slate-300 outline-none mb-4"><option value="all">Lifetime Total</option><option value="today">Today Only</option><option value="month">Current Month</option></select>
                         <div id="stat-revenue" class="text-3xl font-black mb-6 tracking-tight">₹0</div>
                         <div class="space-y-3 pt-6 border-t border-slate-800">
-                            <div class="flex justify-between items-center text-[10px] font-bold text-left"><span class="text-slate-400 uppercase text-left">UPI Digital</span><span id="rev-upi" class="text-blue-400">₹0</span></div>
-                            <div class="flex justify-between items-center text-[10px] font-bold text-left"><span class="text-slate-400 uppercase text-left">Cash Reserve</span><span id="rev-cash" class="text-emerald-400">₹0</span></div>
+                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">UPI Digital</span><span id="rev-upi" class="text-blue-400">₹0</span></div>
+                            <div class="flex justify-between items-center text-[10px] font-bold"><span class="text-slate-400 uppercase">Cash Reserve</span><span id="rev-cash" class="text-emerald-400">₹0</span></div>
                         </div>
                     </div>
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm text-left"><h3 class="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> Active Shifts</h3><div id="shift-load-container" class="space-y-3"></div></div>
@@ -434,7 +440,7 @@
                     <div class="space-y-6">
                         <label class="text-[10px] font-black text-indigo-600 uppercase tracking-widest leading-none">Identity Verification</label>
                         <div class="flex items-center gap-6">
-                            <div class="w-32 h-32 rounded-3xl bg-slate-100 border-2 border-dashed flex items-center justify-center relative overflow-hidden group"><img id="photo-preview" class="w-full h-full object-cover hidden"><div id="photo-placeholder" class="text-slate-300 text-center text-left"><i data-lucide="camera" class="w-8 h-8 mx-auto mb-1"></i><div class="text-[8px] font-black uppercase">Photo</div></div><input type="file" id="photo-upload" accept="image/*" onchange="previewFile(this, 'photo-preview')" class="absolute inset-0 opacity-0 cursor-pointer"></div>
+                            <div class="w-32 h-32 rounded-3xl bg-slate-100 border-2 border-dashed flex items-center justify-center relative overflow-hidden group"><img id="photo-preview" class="w-full h-full object-cover hidden"><div id="photo-placeholder" class="text-slate-300 text-center text-left"><i data-lucide="camera" class="w-8 h-8 mx-auto mb-1"></i><div class="text-[8px] font-black uppercase leading-none text-left">Photo</div></div><input type="file" id="photo-upload" accept="image/*" onchange="previewFile(this, 'photo-preview')" class="absolute inset-0 opacity-0 cursor-pointer"></div>
                             <div class="flex-1 space-y-4"><input type="text" id="name" required placeholder="Full Identity Name" class="w-full bg-slate-50 border p-4 rounded-2xl font-bold text-lg outline-none focus:border-indigo-500"><div class="grid grid-cols-2 gap-3"><div><label class="text-[9px] font-black text-slate-400 uppercase text-left">DOB</label><input type="date" id="dob" required class="w-full bg-slate-50 border p-3 rounded-xl font-bold text-left"></div><div><label class="text-[9px] font-black text-slate-400 uppercase text-left">Aadhar Number</label><input type="text" id="aadhar-num" maxlength="12" pattern="\d{12}" placeholder="12-Digit No" class="w-full bg-slate-50 border p-3 rounded-xl font-bold tracking-widest outline-none"></div></div></div>
                         </div>
                         <div class="grid grid-cols-3 gap-3">
