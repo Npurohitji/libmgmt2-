@@ -12,7 +12,7 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
 
-        // --- FIREBASE CONFIGURATION (PASTED FROM YOUR ACCOUNT) ---
+        // --- FIREBASE CONFIGURATION (YOUR ACCOUNT) ---
         const manualConfig = {
             apiKey: "AIzaSyDDco9kK4uyTKnu0WCfviiJwy87gyUdRr0",
             authDomain: "libmgmt-eccd3.firebaseapp.com",
@@ -32,7 +32,6 @@
         // Initialize Firebase
         let config;
         try {
-            // Priority 1: Environment variable (Internal), Priority 2: Manual Config (External/GitHub)
             config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualConfig;
         } catch (e) {
             config = manualConfig;
@@ -41,7 +40,7 @@
         const app = initializeApp(config);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'libmgmt-eccd3';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : config.projectId;
 
         // --- UI HELPERS ---
         window.setUI = (id, val, attr = 'innerText') => {
@@ -70,7 +69,7 @@
 
         // --- IMAGE HANDLING HELPERS ---
         window.previewFile = (input, pid) => {
-            const f = input.files[0];
+            const f = input.files?.[0];
             if (f) {
                 const r = new FileReader();
                 r.onload = e => {
@@ -233,7 +232,7 @@
 
             const processFile = async (fid) => {
                 const el = document.getElementById(fid);
-                const f = el.files[0];
+                const f = el.files?.[0];
                 if(!f) return null;
                 const b64 = await window.convertToBase64(f);
                 return await window.compressImage(b64);
@@ -319,11 +318,14 @@
 
         // --- STARTUP LOGIC ---
         function setupListeners() {
+            // Students
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'students'), (snap) => {
                 window.students = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.refreshDashboard();
                 window.renderRegistry();
-            });
+            }, (err) => console.error("PermissionDenied Fix: Rules need update on Firebase Console."));
+
+            // Logs
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'logs'), (snap) => {
                 window.logs = snap.docs.map(doc => doc.data()).sort((a,b) => new Date(b.date) - new Date(a.date));
                 window.refreshDashboard();
@@ -345,7 +347,7 @@
                             setTimeout(() => dash.classList.add('opacity-100'), 100);
                         }
                         document.body.classList.remove('overflow-hidden');
-                        window.showToast("Cloud Connected");
+                        window.showToast("Cloud Terminal Connected");
                     }
                 });
             } catch (error) { 
